@@ -7,6 +7,8 @@ Scores read locally are estimates: the evaluation's own readers and game fixes m
 """
 from __future__ import annotations
 
+from .asteroid_capitalist import READER as _asteroid_capitalist
+from .blarglike import READER as _blarglike
 from .off_line import READER as _off_line
 
-READERS: dict = {r.game: r for r in (_off_line,)}
+READERS: dict = {r.game: r for r in (_asteroid_capitalist, _blarglike, _off_line)}
