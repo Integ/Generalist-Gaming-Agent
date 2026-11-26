@@ -7,7 +7,7 @@
 Wraps `python -m gga.runner` from the dataset (data/gga, see scripts/setup_data.sh):
 headless Chromium from the dataset's kit/, frames saved per decision, the run written to
 runs/<stamp>_<name>/, then eval/trace_viewer.py renders runs/.../index.html.
-Local runs have no score unless a reader exists for the game (see eval/README.md).
+Games with a reader in eval/readers/ get a local score (an estimate; see eval/README.md).
 """
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ def main() -> int:
     ap.add_argument("--minutes", type=float, default=None)
     ap.add_argument("--name", default=None, help="run name (default: the agent file's stem)")
     ap.add_argument("--no-frames", action="store_true")
+    ap.add_argument("--no-readers", action="store_true", help="run the dataset as shipped (no local scores)")
     args = ap.parse_args()
 
     if not (DATA / "games.json").is_file():
@@ -52,7 +53,12 @@ def main() -> int:
     if browsers.is_dir():   # the harness pins Playwright 1.60.0, whose Chromium build ships here
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
     print("+", " ".join(cmd), flush=True)
-    code = subprocess.call(cmd, cwd=DATA, env=env)
+    cwd = DATA
+    if not args.no_readers:
+        sys.path.insert(0, str(ROOT / "eval"))
+        from harness import prepare
+        cwd = prepare(DATA)
+    code = subprocess.call(cmd, cwd=cwd, env=env)
 
     if out.is_dir():
         subprocess.call([sys.executable, str(ROOT / "eval" / "trace_viewer.py"), str(out)])
