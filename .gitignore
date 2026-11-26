@@ -1,0 +1,8 @@
+# Competition data must not be redistributed (rules B.4.b): keep it out of git.
+data/
+runs/
+build/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
