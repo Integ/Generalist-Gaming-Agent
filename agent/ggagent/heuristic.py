@@ -31,6 +31,7 @@ MENU_BACK_S = 1.0        # on the title this long during play: the menu came bac
 STUCK_S = 6.0            # no change at all this long during play: try one opener
 STILL = 0.0015           # mean thumbnail change below this counts as "nothing moved"
 PLAY_PROGRAM_MS = 1000
+PLAN_CLICK_GAP_S = 1.5   # the planner's menu clicks, at most this often
 COLUMN = (0.5, 0.62, 0.72, 0.42, 0.82, 0.35)   # Play-button heights to try, as fractions of h
 
 
@@ -51,6 +52,8 @@ class HeuristicAgent:
         self.last_motion_s = 0.0
         self.menu_since_s = None
         self.program_until_s = 0.0
+        self.last_plan_click_s = -1e9
+        self.plan = None
 
     def openers(self, w: int, h: int, pts: list[tuple[int, int]]) -> list[Action]:
         b = self.brief
@@ -70,7 +73,19 @@ class HeuristicAgent:
         return act
 
     # -- the policy --------------------------------------------------------
-    def step(self, obs, tools) -> Action:
+    def plan_click(self, t: float, why: str) -> Action | None:
+        """The planner's click on a menu or game-over screen, at most every PLAN_CLICK_GAP_S."""
+        p = self.plan
+        if p is None or p.click is None or p.screen not in ("menu", "game_over", "other"):
+            return None
+        if t - self.last_plan_click_s < PLAN_CLICK_GAP_S:
+            return None
+        self.last_plan_click_s = self.last_opener_s = t
+        return Action("click", {"x": p.click[0], "y": p.click[1]},
+                      meta={"phase": why, "plan": p.goal[:80]})
+
+    def step(self, obs, tools, plan=None) -> Action:
+        self.plan = plan
         info = obs.info or {}
         w, h = int(info.get("width", 1600)), int(info.get("height", 1000))
         t = float(obs.elapsed_s)
@@ -87,7 +102,7 @@ class HeuristicAgent:
             if not on_title:
                 self.phase, self.menu_since_s = "play", None
             elif t - self.last_opener_s >= START_GAP_S:
-                return self.opener(img, w, h, t, "start")
+                return self.plan_click(t, "start-plan") or self.opener(img, w, h, t, "start")
             else:
                 return Action("skip", meta={"phase": "start"})
 
@@ -99,6 +114,10 @@ class HeuristicAgent:
                 return self.opener(img, w, h, t, "start")
         else:
             self.menu_since_s = None
+        if plan is not None and plan.screen in ("menu", "game_over"):
+            act = self.plan_click(t, "play-plan")
+            if act is not None:
+                return act
         if t - self.last_motion_s > STUCK_S and t - self.last_opener_s > STUCK_S:
             return self.opener(img, w, h, t, "stuck")
 
@@ -109,11 +128,15 @@ class HeuristicAgent:
         return act
 
     def play_program(self, img, w: int, h: int) -> Action:
-        b, rng = self.brief, self.rng
+        b, rng, p = self.brief, self.rng, self.plan
+        move_keys = (p.move_keys if p and p.move_keys else None) or b.move_keys
         keys: list[str] = []
-        if b.move_keys:
-            keys.append(rng.choice(b.move_keys))
-        extra = [k for k in b.action_keys if k not in b.start_keys and k not in ("Escape", "Tab")]
+        if p and p.move_keys:            # the plan's direction: hold its keys together ("up and right")
+            keys += p.move_keys[:2]
+        elif move_keys:
+            keys.append(rng.choice(move_keys))
+        extra = (p.action_keys if p and p.action_keys else None) or [
+            k for k in b.action_keys if k not in b.start_keys and k not in ("Escape", "Tab")]
         if extra and rng.random() < 0.5:
             keys.append(rng.choice(extra))
         if not keys and not b.uses_pointer:
@@ -122,15 +145,18 @@ class HeuristicAgent:
         if b.taps and keys:   # one grid step per press: a burst of taps, not a long hold
             steps = []
             for _ in range(PLAY_PROGRAM_MS // 250):
-                steps += [{"keys": [rng.choice(b.move_keys or keys)], "duration_ms": 120},
+                steps += [{"keys": [rng.choice(move_keys or keys)], "duration_ms": 120},
                           {"keys": [], "duration_ms": 130}]
             return Action("sequence", {"steps": steps}, meta={"phase": "play", "taps": len(steps) // 2})
         step: dict = {"keys": keys, "duration_ms": PLAY_PROGRAM_MS}
-        if b.uses_pointer:
-            x, y = rng.choice(vision.salient_points(img))
+        if b.uses_pointer or (p and (p.aim or p.hold_fire)):
+            x, y = p.aim if p and p.aim else rng.choice(vision.salient_points(img))
             step.update(x=x, y=y)
-            if b.uses_hold_fire:
+            if b.uses_hold_fire or (p and p.hold_fire):
                 step["buttons"] = ["left"]
             elif not keys:
                 return Action("click", {"x": x, "y": y}, meta={"phase": "play"})
-        return Action("sequence", {"steps": [step]}, meta={"phase": "play", "keys": keys})
+        meta = {"phase": "play", "keys": keys}
+        if p is not None:
+            meta["plan"] = p.goal[:80]
+        return Action("sequence", {"steps": [step]}, meta=meta)
