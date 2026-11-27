@@ -18,11 +18,13 @@ from dataclasses import dataclass, field
 from PIL import Image
 
 from . import brief as brief_mod
+from . import vision
 
 MIN_GAP_S = 1.0          # wall seconds between the end of one request and the next
 TTL_S = 12.0             # game seconds a plan stays valid
 MAX_TOKENS = 260
 ERROR_BACKOFF_S = 5.0
+MOVED = 0.004            # thumbnail change between two looks that counts as "the screen changed"
 
 SYSTEM = """You plan for a fast controller that plays a real-time browser game for a human player.
 You see the current screenshot and the game's brief. The controller acts every 200 ms on its own;
@@ -38,7 +40,14 @@ Reply with ONE JSON object and nothing else:
  "aim": [x, y] or null,        // where the mouse should point (an enemy, a target); null if irrelevant
  "avoid": [x, y] or null,      // the most dangerous thing on screen, to move away from
  "goal": "...",                // one short sentence: what to do next
- "notes": "..."}               // one short sentence: what you learned about the rules"""
+ "notes": "..."}               // one short sentence: what you learned about the rules
+
+Rules for "screen":
+- "game_over" only when the screen plainly says the run ended (GAME OVER, YOU DIED, a final score
+  with Play again). A Restart, Menu, Pause or Sound button that stays in a corner or under the play
+  area while the game runs is part of the game screen: that is "playing", with "click": null.
+- If the game world is changing between looks (objects moved, counters changed), it is "playing".
+- Never click Restart/Reset while the game is "playing": it throws away the progress made."""
 
 
 @dataclass
@@ -104,6 +113,7 @@ class Planner:
         self._plan: Plan | None = None
         self._game = 0
         self._notes: list[str] = []
+        self._last_thumb = None
         self._wake = threading.Event()
         self.requests = self.failures = 0
         threading.Thread(target=self._loop, daemon=True, name="planner").start()
@@ -113,6 +123,7 @@ class Planner:
         with self._lock:
             self._game += 1
             self._frame, self._plan, self._notes = None, None, []
+            self._last_thumb = None
 
     def observe(self, t: float, img: Image.Image, info: dict) -> None:
         with self._lock:
@@ -125,10 +136,12 @@ class Planner:
         return p if p is not None and p.fresh(now_s) else None
 
     # -- background ----------------------------------------------------------
-    def _prompt(self, info: dict, t: float) -> str:
+    def _prompt(self, info: dict, t: float, moved: bool | None = None) -> str:
         b = brief_mod.parse(info)
         lines = [f"Game brief: {b.description}", f"Controls: {b.controls}",
                  f"Game time: {t:.0f} s, {float(info.get('remaining_s', 0)):.0f} s left."]
+        if moved is not None:
+            lines.append("Since your last look the screen " + ("CHANGED." if moved else "did NOT change."))
         if self._notes:
             lines.append("Your earlier notes: " + " | ".join(self._notes[-4:]))
         lines.append("Plan the next few seconds. JSON only.")
@@ -143,11 +156,14 @@ class Planner:
             if frame is None:
                 continue
             t, img, info = frame
+            th = vision.thumb(img)
+            moved = None if self._last_thumb is None else vision.change(self._last_thumb, th) > MOVED
+            self._last_thumb = th
             w, h = int(info.get("width", img.width)), int(info.get("height", img.height))
             start = time.monotonic()
             self.requests += 1
             try:
-                text = self.backend.generate(SYSTEM, [img], self._prompt(info, t), MAX_TOKENS)
+                text = self.backend.generate(SYSTEM, [img], self._prompt(info, t, moved), MAX_TOKENS)
                 plan = parse_plan(text, t, w, h)
             except Exception as exc:  # a dead or slow server must never reach step()
                 self.failures += 1
