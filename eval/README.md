@@ -43,3 +43,24 @@ off_line 用我们的 CPU 基线 0.059。分数随时间上涨，和 10 分钟�
 3. `eval/` 加一个汇总脚本：多个智能体在验证集上的平均归一化分数 + 置信区间（`gga.scoring.compare` 可以复用）。
 
 验证集上的分数是私有榜的代理指标；公开榜只作参考（它包含 4 个样例游戏）。
+
+## 开源小游戏测试集（私有榜的替代指标）
+
+私有榜的 16 个游戏看不到，所以用 agent 从没调过的游戏衡量泛化能力：alexchilton 在 Kaggle 上整理的
+54 个 js13kGames 小游戏（`alexchilton/gga-open-jam-games-test-set`，大多 MIT，每个游戏目录带自己的
+`LICENSE.repo`）。游戏文件不进 git，用脚本下载：
+
+```bash
+scripts/setup_data.sh && scripts/setup_jam.sh     # 数据放到 data/gga、data/jam
+python eval/jam.py --list                         # 默认的 24 个游戏
+python eval/jam.py --jobs 3                       # agent/agent.py，每个游戏 2 分钟
+python eval/jam.py --games roads,pulse --minutes 1 --env GGA_MODEL=mock --tag quick
+```
+
+- 默认只算有非平凡计分的游戏，去掉也是比赛游戏的 off_line（共 24 个）。
+- 归一化和官方一样：clip((最好值 - idle) / (reference - idle), 0, 1)。reference 是随机或固定按键
+  策略 2 分钟里的最好成绩，**不是人类成绩**，所以 1.0 只代表"和随机按键一样好"，不能和榜上分数直接比。
+- 数据集里的 Python 脚本不运行：`eval/jam.py` 把 `games_extra.json` 当数据读，并用 `ast` 解析
+  `tools/extra_games.py` 里的 `_reader(...)` 调用拿到计分器（不执行），然后在 `build/jam/` 组装 harness。
+- 结果在 `runs/jam/<tag>/`：每个游戏一个 json，`summary.json` 是汇总。
+- 容器里渲染只有实时的 0.3–0.4 倍，24 个游戏 `--jobs 3` 大约要 1 小时。
