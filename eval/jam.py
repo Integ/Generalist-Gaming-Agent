@@ -112,6 +112,18 @@ READERS = {g: _build(g, s) for g, s in json.loads((Path(__file__).parent / "read
 '''
 
 
+PAUSE = '''"""No in-game pause policy locally (stand-in for the withheld gga/readers/pause.py)."""
+
+
+def without_pause(reader):
+    return reader
+
+
+def pause_input_script(game_id):
+    return None
+'''
+
+
 def games() -> dict[str, dict]:
     return json.loads((EXTRA / "games_extra.json").read_text())["games"]
 
@@ -131,7 +143,7 @@ def prepare() -> Path:
     shutil.copytree(DATA / "gga", BUILD / "gga", ignore=shutil.ignore_patterns("readers", "__pycache__"))
     rd = BUILD / "gga" / "readers"
     rd.mkdir()
-    shutil.copy(ROOT / "eval" / "readers" / "pause.py", rd / "pause.py")
+    (rd / "pause.py").write_text(PAUSE)
     (rd / "readers.json").write_text(json.dumps(reader_specs(JAM / "tools" / "extra_games.py"), indent=1))
     (rd / "__init__.py").write_text(READERS_INIT)
     return BUILD
@@ -186,7 +198,21 @@ def main() -> None:
     ap.add_argument("--tag")
     ap.add_argument("--env", action="append", default=[], help="KEY=VALUE for the agent process")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--data", help="competition data root (default data/gga)")
+    ap.add_argument("--jam", help="jam dataset root (default data/jam)")
+    ap.add_argument("--build", help="where to assemble the harness (default build/jam)")
+    ap.add_argument("--browsers", help="Playwright browsers (default <data>/kit/browsers)")
+    ap.add_argument("--out", help="results directory (default runs/jam/<tag>)")
     a = ap.parse_args()
+    global DATA, JAM, EXTRA, BUILD, BROWSERS
+    if a.data:
+        DATA = Path(a.data)
+    if a.jam:
+        JAM = Path(a.jam)
+        EXTRA = JAM / "data" / "extra_games"
+    if a.build:
+        BUILD = Path(a.build)
+    BROWSERS = Path(a.browsers) if a.browsers else DATA / "kit" / "browsers"
 
     all_games = games()
     chosen = a.games.split(",") if a.games else default_games(all_games, a.include_trivial)
@@ -204,7 +230,7 @@ def main() -> None:
     agent = Path(a.agent).resolve()
     env = dict(e.split("=", 1) for e in a.env)
     tag = a.tag or time.strftime("%Y%m%d-%H%M%S") + "_" + agent.stem
-    out = ROOT / "runs" / "jam" / tag
+    out = Path(a.out) if a.out else ROOT / "runs" / "jam" / tag
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     with ThreadPoolExecutor(max(1, a.jobs)) as pool:
@@ -224,7 +250,7 @@ def main() -> None:
                "games": len(chosen), "wall_s": round(time.time() - t0), "rows": result}
     (out / "summary.json").write_text(json.dumps(summary, indent=1))
     print(f"mean normalised over {len(got)} of {len(chosen)} games: {mean:.4f}   "
-          f"({summary['wall_s']} s, {out.relative_to(ROOT)})")
+          f"({summary['wall_s']} s, {out})")
 
 
 if __name__ == "__main__":
