@@ -64,3 +64,7 @@ python eval/jam.py --games roads,pulse --minutes 1 --env GGA_MODEL=mock --tag qu
   `tools/extra_games.py` 里的 `_reader(...)` 调用拿到计分器（不执行），然后在 `build/jam/` 组装 harness。
 - 结果在 `runs/jam/<tag>/`：每个游戏一个 json，`summary.json` 是汇总。
 - 容器里渲染只有实时的 0.3–0.4 倍，24 个游戏 `--jobs 3` 大约要 1 小时。
+
+CPU 基线（2026-11-27，`agent/agent.py` 不带规划器，2 分钟/游戏，`--jobs 3` 用时 25 分钟）：**0.510**。
+得 0 分的 7 个：lovely_drive、falling_down、bridge_the_gap、hyperspace、captain_katamov、
+stay_off_the_line、sopwith_back，是下一步改进的重点。
