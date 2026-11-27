@@ -162,6 +162,9 @@ class Planner:
                     self._plan = plan
                     if plan.notes:
                         self._notes.append(plan.notes)
+                    print(f"plan t={t:.1f} lat={latency:.1f} {plan.screen} click={plan.click} move={plan.move_keys} "
+                          f"act={plan.action_keys} fire={plan.hold_fire} aim={plan.aim} | {plan.goal[:100]}",
+                          flush=True)
             if plan is None:
                 self.failures += 1
             time.sleep(max(0.0, MIN_GAP_S))

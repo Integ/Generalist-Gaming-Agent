@@ -32,7 +32,9 @@ STUCK_S = 6.0            # no change at all this long during play: try one opene
 STILL = 0.0015           # mean thumbnail change below this counts as "nothing moved"
 PLAY_PROGRAM_MS = 1000
 START_GIVEUP_S = 12.0    # still "on the title" after this long of openers: trust the title test no more
-PLAN_CLICK_GAP_S = 1.5   # the planner's menu clicks, at most this often
+PLAN_CLICK_GAP_S = 1.5
+PLAN_CLICK_STILL_S = 1.5  # during play, the planner's game-over click waits for the screen to settle
+AIM_FRESH_S = 3.0         # a planner aim older than this points at where the target was, not is   # the planner's menu clicks, at most this often
 COLUMN = (0.5, 0.62, 0.72, 0.42, 0.82, 0.35)   # Play-button heights to try, as fractions of h
 
 
@@ -121,7 +123,10 @@ class HeuristicAgent:
                 return self.opener(img, w, h, t, "start")
         else:
             self.menu_since_s = None
-        if plan is not None and plan.screen in ("menu", "game_over"):
+        # A planner that mistakes a busy game screen with a Restart button for game over would
+        # restart the game every few seconds: during play, only click once the screen is still.
+        if (plan is not None and plan.screen in ("menu", "game_over")
+                and t - self.last_motion_s >= PLAN_CLICK_STILL_S):
             act = self.plan_click(t, "play-plan")
             if act is not None:
                 return act
@@ -130,12 +135,13 @@ class HeuristicAgent:
 
         if t < self.program_until_s - 0.2:
             return Action("skip", meta={"phase": "play"})
-        act = self.play_program(img, w, h)
+        act = self.play_program(img, w, h, t)
         self.program_until_s = t + PLAY_PROGRAM_MS / 1000
         return act
 
-    def play_program(self, img, w: int, h: int) -> Action:
+    def play_program(self, img, w: int, h: int, t: float = 0.0) -> Action:
         b, rng, p = self.brief, self.rng, self.plan
+        aim = p.aim if p and p.aim and t - p.made_at_s <= AIM_FRESH_S and rng.random() < 0.7 else None
         move_keys = (p.move_keys if p and p.move_keys else None) or b.move_keys
         keys: list[str] = []
         if p and p.move_keys:            # the plan's direction: hold its keys together ("up and right")
@@ -151,7 +157,7 @@ class HeuristicAgent:
 
         keys += [k for k in b.hold_keys if k not in keys]   # throttle and the like: always down
         if b.hold_release and not keys:   # hold the button for a random time, then let go
-            x, y = (p.aim if p and p.aim else (w // 2, h // 2))
+            x, y = aim or (w // 2, h // 2)
             hold = rng.choice((250, 400, 600, 800, 1000, 1300))
             return Action("sequence", {"steps": [{"keys": [], "duration_ms": hold, "x": x, "y": y, "buttons": ["left"]},
                                                  {"keys": [], "duration_ms": 900, "x": x, "y": y}]},
@@ -163,8 +169,8 @@ class HeuristicAgent:
                           {"keys": list(b.hold_keys), "duration_ms": 130}]
             return Action("sequence", {"steps": steps}, meta={"phase": "play", "taps": len(steps) // 2})
         step: dict = {"keys": keys, "duration_ms": PLAY_PROGRAM_MS}
-        if b.uses_pointer or (p and (p.aim or p.hold_fire)):
-            x, y = p.aim if p and p.aim else rng.choice(vision.salient_points(img))
+        if b.uses_pointer or aim or (p and p.hold_fire):
+            x, y = aim or rng.choice(vision.salient_points(img))
             step.update(x=x, y=y)
             if b.uses_hold_fire or (p and p.hold_fire):
                 step["buttons"] = ["left"]
