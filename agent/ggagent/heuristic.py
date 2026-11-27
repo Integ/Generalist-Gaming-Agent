@@ -131,7 +131,9 @@ class HeuristicAgent:
         b, rng, p = self.brief, self.rng, self.plan
         move_keys = (p.move_keys if p and p.move_keys else None) or b.move_keys
         keys: list[str] = []
-        if move_keys:
+        if p and p.move_keys:            # the plan's direction: hold its keys together ("up and right")
+            keys += p.move_keys[:2]
+        elif move_keys:
             keys.append(rng.choice(move_keys))
         extra = (p.action_keys if p and p.action_keys else None) or [
             k for k in b.action_keys if k not in b.start_keys and k not in ("Escape", "Tab")]
