@@ -80,6 +80,8 @@ def parse(info: dict) -> Brief:
             b.action_keys.append(k)
 
     b.uses_pointer = bool(re.search(r"click|mouse|drag|aim|tap|pointer|cursor", text))
+    if re.search(r"\bno (mouse|pointer)\b|mouse (is not|isn't) used", text):   # "There is no mouse input."
+        b.uses_pointer = False
     b.taps = bool(re.search(r"per press|one (grid )?(step|cell|square|tile)|turn-based|turn based|each press",
                             text + " " + desc.lower()))
     b.uses_hold_fire = bool(re.search(r"hold (the )?(left )?mouse|hold (the )?(left )?button|hold to fire", text))

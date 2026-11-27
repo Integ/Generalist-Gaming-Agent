@@ -98,10 +98,16 @@ def test_policy_follows_plan_keys_and_aim_while_playing():
     pol.reset(INFO)
     pol.step(obs(0.2, (30, 30, 30)), [])             # the title frame
     plan = Plan(made_at_s=1.0, screen="playing", move_keys=["ArrowUp"], hold_fire=True, aim=(100, 200))
-    act = pol.step(obs(1.0, (200, 50, 50)), [], plan=plan)   # a different screen: the game runs
-    assert act.tool == "sequence"
-    step = act.params["steps"][0]
-    assert step["keys"][0] == "ArrowUp" and (step["x"], step["y"]) == (100, 200) and step["buttons"] == ["left"]
+    steps = []
+    for i in range(6):   # a different screen: the game runs; one program a second
+        act = pol.step(obs(1.0 + i, (200, 50 + 20 * i, 50)), [], plan=plan)
+        assert act.tool == "sequence"
+        steps.append(act.params["steps"][0])
+    assert all(s["buttons"] == ["left"] for s in steps)
+    assert sum(s["keys"][0] == "ArrowUp" for s in steps) >= 3     # the plan's keys, most of the time
+    aimed = [(s["x"], s["y"]) == (100, 200) for s in steps]
+    assert any(aimed[:3])            # a fresh aim is followed (most of the time)
+    assert not any(aimed[4:])        # an aim older than AIM_FRESH_S is not
 
 
 class _FakeOpenAI(BaseHTTPRequestHandler):

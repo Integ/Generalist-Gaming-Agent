@@ -25,3 +25,8 @@ def test_hold_fire_stays_hold_fire():
 def test_dead_arrows_and_cell_taps():
     b = brief.parse({"controls": "Press Space to start. W, A, S, D move one cell. The arrow keys do nothing."})
     assert b.move_keys == ["w", "a", "s", "d"] and b.taps and b.start_keys == ["Space"]
+
+
+def test_no_mouse_input():
+    b = brief.parse({"controls": "The arrow keys change direction and Space drops a bomb. There is no mouse input."})
+    assert not b.uses_pointer and b.move_keys
