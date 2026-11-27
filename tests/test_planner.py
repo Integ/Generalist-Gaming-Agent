@@ -110,6 +110,18 @@ def test_policy_follows_plan_keys_and_aim_while_playing():
     assert not any(aimed[4:])        # an aim older than AIM_FRESH_S is not
 
 
+def test_play_click_needs_two_plans_that_agree():
+    pol = HeuristicAgent()
+    pol.reset(INFO)
+    pol.step(obs(0.2, (30, 30, 30)), [])
+    one = Plan(made_at_s=1.0, screen="game_over", click=(400, 300))
+    act = pol.step(obs(1.0, (200, 50, 50)), [], plan=one)          # the game runs; one plan says game over
+    assert act.tool != "click"
+    two = Plan(made_at_s=2.0, screen="game_over", click=(400, 300))
+    act = pol.step(obs(2.0, (200, 60, 50)), [], plan=two)          # a second plan agrees
+    assert act.tool == "click" and (act.params["x"], act.params["y"]) == (400, 300)
+
+
 class _FakeOpenAI(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass

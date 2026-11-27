@@ -59,6 +59,7 @@ class HeuristicAgent:
         self.program_until_s = 0.0
         self.last_plan_click_s = -1e9
         self.plan = None
+        self.plan_screens: list[str] = []   # screen of each distinct plan seen, newest last
 
     def openers(self, w: int, h: int, pts: list[tuple[int, int]]) -> list[Action]:
         b = self.brief
@@ -90,6 +91,8 @@ class HeuristicAgent:
                       meta={"phase": why, "plan": p.goal[:80]})
 
     def step(self, obs, tools, plan=None) -> Action:
+        if plan is not None and plan is not self.plan:
+            self.plan_screens = (self.plan_screens + [plan.screen])[-2:]
         self.plan = plan
         info = obs.info or {}
         w, h = int(info.get("width", 1600)), int(info.get("height", 1000))
@@ -123,7 +126,10 @@ class HeuristicAgent:
                 return self.opener(img, w, h, t, "start")
         else:
             self.menu_since_s = None
-        if plan is not None and plan.screen in ("menu", "game_over"):
+        # During play, a menu/game-over click needs two plans in a row that say so: one look at a
+        # game screen with a Restart button in it must not restart the game.
+        if (plan is not None and len(self.plan_screens) == 2
+                and all(sc in ("menu", "game_over") for sc in self.plan_screens)):
             act = self.plan_click(t, "play-plan")
             if act is not None:
                 return act
