@@ -103,22 +103,11 @@ def test_policy_follows_plan_keys_and_aim_while_playing():
         act = pol.step(obs(1.0 + i, (200, 50 + 20 * i, 50)), [], plan=plan)
         assert act.tool == "sequence"
         steps.append(act.params["steps"][0])
-    assert all(s["keys"][0] == "ArrowUp" and s["buttons"] == ["left"] for s in steps)
+    assert all(s["buttons"] == ["left"] for s in steps)
+    assert sum(s["keys"][0] == "ArrowUp" for s in steps) >= 3     # the plan's keys, most of the time
     aimed = [(s["x"], s["y"]) == (100, 200) for s in steps]
     assert any(aimed[:3])            # a fresh aim is followed (most of the time)
     assert not any(aimed[4:])        # an aim older than AIM_FRESH_S is not
-
-
-def test_plan_game_over_click_waits_for_a_still_screen():
-    pol = HeuristicAgent()
-    pol.reset(INFO)
-    pol.step(obs(0.2, (30, 30, 30)), [])
-    plan = Plan(made_at_s=1.0, screen="game_over", click=(400, 300))
-    act = pol.step(obs(1.0, (200, 50, 50)), [], plan=plan)          # the screen just changed
-    assert act.tool != "click"
-    for t in (1.6, 2.2, 2.8):                                       # then it stays still
-        act = pol.step(obs(t, (200, 50, 50)), [], plan=plan)
-    assert act.tool == "click" and (act.params["x"], act.params["y"]) == (400, 300)
 
 
 class _FakeOpenAI(BaseHTTPRequestHandler):

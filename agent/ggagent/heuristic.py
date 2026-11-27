@@ -33,7 +33,7 @@ STILL = 0.0015           # mean thumbnail change below this counts as "nothing m
 PLAY_PROGRAM_MS = 1000
 START_GIVEUP_S = 12.0    # still "on the title" after this long of openers: trust the title test no more
 PLAN_CLICK_GAP_S = 1.5
-PLAN_CLICK_STILL_S = 1.5  # during play, the planner's game-over click waits for the screen to settle
+PLAN_KEYS_P = 0.65        # share of play programs that follow the planner's keys; the rest explore
 AIM_FRESH_S = 3.0         # a planner aim older than this points at where the target was, not is   # the planner's menu clicks, at most this often
 COLUMN = (0.5, 0.62, 0.72, 0.42, 0.82, 0.35)   # Play-button heights to try, as fractions of h
 
@@ -123,10 +123,7 @@ class HeuristicAgent:
                 return self.opener(img, w, h, t, "start")
         else:
             self.menu_since_s = None
-        # A planner that mistakes a busy game screen with a Restart button for game over would
-        # restart the game every few seconds: during play, only click once the screen is still.
-        if (plan is not None and plan.screen in ("menu", "game_over")
-                and t - self.last_motion_s >= PLAN_CLICK_STILL_S):
+        if plan is not None and plan.screen in ("menu", "game_over"):
             act = self.plan_click(t, "play-plan")
             if act is not None:
                 return act
@@ -142,9 +139,12 @@ class HeuristicAgent:
     def play_program(self, img, w: int, h: int, t: float = 0.0) -> Action:
         b, rng, p = self.brief, self.rng, self.plan
         aim = p.aim if p and p.aim and t - p.made_at_s <= AIM_FRESH_S and rng.random() < 0.7 else None
-        move_keys = (p.move_keys if p and p.move_keys else None) or b.move_keys
+        # A plan's keys held for its whole life can steer a car off the road (lovely_drive): follow
+        # them most of the time and explore the brief's keys otherwise.
+        follow = bool(p and p.move_keys) and (not b.move_keys or rng.random() < PLAN_KEYS_P)
+        move_keys = (p.move_keys if follow else None) or b.move_keys
         keys: list[str] = []
-        if p and p.move_keys:            # the plan's direction: hold its keys together ("up and right")
+        if follow:                       # the plan's direction: hold its keys together ("up and right")
             keys += p.move_keys[:2]
         elif move_keys:
             keys.append(rng.choice(move_keys))
