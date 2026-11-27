@@ -31,6 +31,7 @@ MENU_BACK_S = 1.0        # on the title this long during play: the menu came bac
 STUCK_S = 6.0            # no change at all this long during play: try one opener
 STILL = 0.0015           # mean thumbnail change below this counts as "nothing moved"
 PLAY_PROGRAM_MS = 1000
+START_GIVEUP_S = 12.0    # still "on the title" after this long of openers: trust the title test no more
 PLAN_CLICK_GAP_S = 1.5   # the planner's menu clicks, at most this often
 COLUMN = (0.5, 0.62, 0.72, 0.42, 0.82, 0.35)   # Play-button heights to try, as fractions of h
 
@@ -45,6 +46,8 @@ class HeuristicAgent:
         self.brief = brief_mod.parse(info)
         self.rng = random.Random(self.seed)
         self.phase = "start"
+        self.start_since_s = 0.0
+        self.title_reliable = True   # False once openers ran START_GIVEUP_S without leaving the title
         self.opener_i = 0
         self.last_opener_s = -1e9
         self.title = None
@@ -96,9 +99,13 @@ class HeuristicAgent:
         if vision.change(self.prev_thumb, th) > STILL:
             self.last_motion_s = t
         self.prev_thumb = th
-        on_title = vision.change(self.title, th) < MENU_SIM
+        on_title = self.title_reliable and vision.change(self.title, th) < MENU_SIM
 
         if self.phase == "start":
+            if on_title and t - self.start_since_s >= START_GIVEUP_S:
+                # A sparse screen (a few sprites on black) can start without the thumbnail
+                # moving off the title: play anyway, and leave game-over handling to STUCK_S.
+                self.title_reliable = on_title = False
             if not on_title:
                 self.phase, self.menu_since_s = "play", None
             elif t - self.last_opener_s >= START_GAP_S:
@@ -110,7 +117,7 @@ class HeuristicAgent:
         if on_title:
             self.menu_since_s = t if self.menu_since_s is None else self.menu_since_s
             if t - self.menu_since_s >= MENU_BACK_S:
-                self.phase, self.opener_i = "start", 0
+                self.phase, self.opener_i, self.start_since_s = "start", 0, t
                 return self.opener(img, w, h, t, "start")
         else:
             self.menu_since_s = None
@@ -142,11 +149,18 @@ class HeuristicAgent:
         if not keys and not b.uses_pointer:
             keys = [rng.choice(brief_mod.ARROWS + ["Space"])]
 
+        keys += [k for k in b.hold_keys if k not in keys]   # throttle and the like: always down
+        if b.hold_release and not keys:   # hold the button for a random time, then let go
+            x, y = (p.aim if p and p.aim else (w // 2, h // 2))
+            hold = rng.choice((250, 400, 600, 800, 1000, 1300))
+            return Action("sequence", {"steps": [{"keys": [], "duration_ms": hold, "x": x, "y": y, "buttons": ["left"]},
+                                                 {"keys": [], "duration_ms": 900, "x": x, "y": y}]},
+                          meta={"phase": "play", "hold_ms": hold})
         if b.taps and keys:   # one grid step per press: a burst of taps, not a long hold
             steps = []
             for _ in range(PLAY_PROGRAM_MS // 250):
                 steps += [{"keys": [rng.choice(move_keys or keys)], "duration_ms": 120},
-                          {"keys": [], "duration_ms": 130}]
+                          {"keys": list(b.hold_keys), "duration_ms": 130}]
             return Action("sequence", {"steps": steps}, meta={"phase": "play", "taps": len(steps) // 2})
         step: dict = {"keys": keys, "duration_ms": PLAY_PROGRAM_MS}
         if b.uses_pointer or (p and (p.aim or p.hold_fire)):
