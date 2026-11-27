@@ -68,3 +68,7 @@ python eval/jam.py --games roads,pulse --minutes 1 --env GGA_MODEL=mock --tag qu
 CPU 基线（2026-11-27，`agent/agent.py` 不带规划器，2 分钟/游戏，`--jobs 3` 用时 25 分钟）：**0.510**。
 得 0 分的 7 个：lovely_drive、falling_down、bridge_the_gap、hyperspace、captain_katamov、
 stay_off_the_line、sopwith_back，是下一步改进的重点。
+
+第一轮改进后（同日，标题判断超时放弃、按住油门键、按住再松开的鼠标操作、"一格一步"点按）：**0.641**。
+lovely_drive 0→0.92，stay_off_the_line 0→0.73，falling_down 0→0.48，bridge_the_gap 0→0.33；
+样例游戏 1 分钟结果不变（asteroid 0.139、off_line 0.022、blarglike 0）。单次运行有随机波动，约 ±0.03。
