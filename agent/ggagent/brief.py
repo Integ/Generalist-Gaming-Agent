@@ -28,6 +28,7 @@ class Brief:
     start_keys: list[str] = field(default_factory=list)   # keys the brief says start or restart the game
     uses_pointer: bool = False                             # click / mouse / drag / aim
     uses_hold_fire: bool = False                           # "hold the mouse button" style controls
+    taps: bool = False                                     # one step per key press (grid / turn-based)
     start_words: list[str] = field(default_factory=list)  # button labels to look for ("Play", "Start")
 
     @property
@@ -60,6 +61,7 @@ def parse(info: dict) -> Brief:
             b.action_keys.append(k)
 
     b.uses_pointer = bool(re.search(r"click|mouse|drag|aim|tap|pointer|cursor", text))
+    b.taps = bool(re.search(r"per press|one (grid )?step|turn-based|turn based|each press", text + " " + desc.lower()))
     b.uses_hold_fire = bool(re.search(r"hold (the )?(left )?mouse|hold (the )?(left )?button|hold to fire", text))
 
     # Keys tied to starting: "Press Space to start", "press R to restart", "Press any key to begin".

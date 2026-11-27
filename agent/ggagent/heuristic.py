@@ -3,12 +3,18 @@
 It is the floor every smarter agent must beat, and the fallback when a model is slow
 or absent. Phases per game:
 
-  start  cycle through openers (start keys from the brief, Space, Enter, clicks on the
-         centre and on salient points) until the screen keeps changing by itself;
+  start  the screen still looks like the title screen (the first frame of the game):
+         try openers in turn (start keys from the brief, Space, Enter, clicks down the
+         centre column where Play buttons sit, then salient points);
   play   one-second `sequence` programs over the brief's movement and action keys,
          with the pointer held or clicked where the brief says it is used;
-  stuck  when the screen barely changes for STUCK_S, go back to start (a game-over or
-         menu screen usually needs the same openers).
+  back   the screen looks like the title again (the menu came back after a game over):
+         return to start. A screen that has not changed at all for STUCK_S also gets
+         one opener (a game-over screen that differs from the title).
+
+"Looks like the title" compares a thumbnail of the frame with the title's, so an
+animated menu background (moving asteroids, scrolling stars) does not count as the game
+having started; frame-to-frame motion alone cannot tell those apart.
 """
 from __future__ import annotations
 
@@ -20,9 +26,12 @@ from . import brief as brief_mod
 from . import vision
 
 START_GAP_S = 0.6        # wait between openers, so each can take effect
-STUCK_S = 4.0            # little change for this long: assume a menu or game-over screen
+MENU_SIM = 0.012         # thumbnail change from the title below this: still on the title screen
+MENU_BACK_S = 1.0        # on the title this long during play: the menu came back
+STUCK_S = 6.0            # no change at all this long during play: try one opener
 STILL = 0.0015           # mean thumbnail change below this counts as "nothing moved"
 PLAY_PROGRAM_MS = 1000
+COLUMN = (0.5, 0.62, 0.72, 0.42, 0.82, 0.35)   # Play-button heights to try, as fractions of h
 
 
 class HeuristicAgent:
@@ -37,17 +46,28 @@ class HeuristicAgent:
         self.phase = "start"
         self.opener_i = 0
         self.last_opener_s = -1e9
+        self.title = None
         self.prev_thumb = None
         self.last_motion_s = 0.0
+        self.menu_since_s = None
         self.program_until_s = 0.0
 
     def openers(self, w: int, h: int, pts: list[tuple[int, int]]) -> list[Action]:
         b = self.brief
         acts = [Action("press_key", {"key": k}) for k in b.start_keys]
-        acts += [Action("press_key", {"key": "Space"}), Action("press_key", {"key": "Enter"}),
-                 Action("click", {"x": w // 2, "y": h // 2})]
+        if b.uses_pointer or not b.start_keys:
+            acts += [Action("click", {"x": w // 2, "y": int(f * h)}) for f in COLUMN]
+        acts += [Action("press_key", {"key": "Space"}), Action("press_key", {"key": "Enter"})]
         acts += [Action("click", {"x": x, "y": y}) for x, y in pts[:4]]
         return acts
+
+    def opener(self, img, w: int, h: int, t: float, why: str) -> Action:
+        acts = self.openers(w, h, vision.salient_points(img))
+        act = acts[self.opener_i % len(acts)]
+        self.opener_i += 1
+        self.last_opener_s = t
+        act.meta = {"phase": why, "opener": self.opener_i}
+        return act
 
     # -- the policy --------------------------------------------------------
     def step(self, obs, tools) -> Action:
@@ -56,28 +76,31 @@ class HeuristicAgent:
         t = float(obs.elapsed_s)
         img = vision.decode(obs.image)
         th = vision.thumb(img)
-        moved = vision.change(self.prev_thumb, th) > STILL
-        self.prev_thumb = th
-        if moved:
+        if self.title is None:
+            self.title = th
+        if vision.change(self.prev_thumb, th) > STILL:
             self.last_motion_s = t
-
-        if self.phase == "play" and t - self.last_motion_s > STUCK_S:
-            self.phase, self.opener_i = "start", 0
+        self.prev_thumb = th
+        on_title = vision.change(self.title, th) < MENU_SIM
 
         if self.phase == "start":
-            if moved and self.opener_i > 0 and t - self.last_opener_s > START_GAP_S * 2:
-                self.phase = "play"           # the screen runs by itself now
+            if not on_title:
+                self.phase, self.menu_since_s = "play", None
             elif t - self.last_opener_s >= START_GAP_S:
-                acts = self.openers(w, h, vision.salient_points(img))
-                act = acts[self.opener_i % len(acts)]
-                self.opener_i += 1
-                self.last_opener_s = t
-                if self.opener_i >= 2 * len(acts):
-                    self.phase = "play"       # nothing worked: try playing anyway
-                act.meta = {"phase": "start", "opener": self.opener_i}
-                return act
+                return self.opener(img, w, h, t, "start")
             else:
                 return Action("skip", meta={"phase": "start"})
+
+        # play
+        if on_title:
+            self.menu_since_s = t if self.menu_since_s is None else self.menu_since_s
+            if t - self.menu_since_s >= MENU_BACK_S:
+                self.phase, self.opener_i = "start", 0
+                return self.opener(img, w, h, t, "start")
+        else:
+            self.menu_since_s = None
+        if t - self.last_motion_s > STUCK_S and t - self.last_opener_s > STUCK_S:
+            return self.opener(img, w, h, t, "stuck")
 
         if t < self.program_until_s - 0.2:
             return Action("skip", meta={"phase": "play"})
@@ -96,6 +119,12 @@ class HeuristicAgent:
         if not keys and not b.uses_pointer:
             keys = [rng.choice(brief_mod.ARROWS + ["Space"])]
 
+        if b.taps and keys:   # one grid step per press: a burst of taps, not a long hold
+            steps = []
+            for _ in range(PLAY_PROGRAM_MS // 250):
+                steps += [{"keys": [rng.choice(b.move_keys or keys)], "duration_ms": 120},
+                          {"keys": [], "duration_ms": 130}]
+            return Action("sequence", {"steps": steps}, meta={"phase": "play", "taps": len(steps) // 2})
         step: dict = {"keys": keys, "duration_ms": PLAY_PROGRAM_MS}
         if b.uses_pointer:
             x, y = rng.choice(vision.salient_points(img))
