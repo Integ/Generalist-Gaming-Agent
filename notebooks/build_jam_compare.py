@@ -48,6 +48,23 @@ if not RERUN:
 """
 
 
+HYBRID = """\
+# Submission agent: the sample games keep the baseline's scripted solvers (they only lift the public
+# board); every other game is played by our agent (agent/), steered by the same model server.
+import importlib.util
+os.environ.update(GGA_MODEL_URL=FLASH_URL, GGA_MODEL_NAME=SERVED_MODEL_NAME)
+_spec = importlib.util.spec_from_file_location('ouragent', '/kaggle/working/ours/agent.py')
+ours = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ours)
+
+
+class Agent(Dispatch):
+    \"\"\"Sample games -> scripted solver; every other game -> our agent.\"\"\"
+    def __init__(self):
+        super().__init__(fallback=ours.Agent())
+"""
+
+
 def cell(src: str) -> dict:
     return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
             "source": src.splitlines(keepends=True)}
@@ -62,6 +79,8 @@ def main() -> int:
     ap.add_argument("baseline", help="the pulled baseline .ipynb (its kernel-metadata.json next to it)")
     ap.add_argument("--id", required=True)
     ap.add_argument("--minutes", type=float, default=2.0)
+    ap.add_argument("--hybrid", action="store_true",
+                    help="no jam run: serve the sample solvers + our agent (a submission notebook)")
     ap.add_argument("--push", action="store_true")
     a = ap.parse_args()
     src = Path(a.baseline)
@@ -77,7 +96,7 @@ def main() -> int:
     for f in sorted((ROOT / "agent" / "ggagent").glob("*.py")):
         added.append(writefile(f"/kaggle/working/ours/ggagent/{f.name}", f.read_text()))
     added.append(writefile("/kaggle/working/ours/agent.py", (ROOT / "agent" / "agent.py").read_text()))
-    added.append(cell(RUN.replace("{minutes}", f"{a.minutes:g}")))
+    added.append(cell(HYBRID) if a.hybrid else cell(RUN.replace("{minutes}", f"{a.minutes:g}")))
     nb["cells"] = cells[:-1] + added + [serve]
     OUT.mkdir(parents=True, exist_ok=True)
     for old in OUT.glob("*.ipynb"):
